@@ -1,0 +1,122 @@
+WITH master_base AS (
+  SELECT
+    DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')                    AS local_created_date,
+    (journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai'                    AS local_created_time,
+    EXTRACT(HOUR FROM (journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')       AS local_booking_hr,
+    TRIM(TO_CHAR((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai','Day'))     AS weekday,
+    journey_id,
+	ref_journey_id,
+    ref_parent_journey_id,
+    ref_customer_id,
+    customer_id,
+    ref_driver_id,
+    CASE WHEN ref_vehicle_category_id IN ('65d4bce6d30d222a7c7921b9','65d4bce6d30d222a7c7921ba')
+         THEN 'Taxi' ELSE 'Limo' END                                                                      AS vehicle_cat,
+    journey_status,
+    journey_status_desc,
+    journey_created_at,
+    on_route_timestamp,
+    accepted_ride_timestamp,
+    arrived_at_pickup_timestamp,
+    journey_start_timestamp,
+    journey_completed_timestamp,
+    COALESCE(dispatch_eta_sec, first_eta) AS dispatch_eta_sec,
+    journey_cancel_timestamp,
+    ref_promo_applied,
+    actual_distance,
+    actual_total_fee,
+    estimate_total_fee,
+    actual_base_fee,
+    actual_total_distance_fee,
+    actual_total_time_fee,
+    pickup_latitude,
+    pickup_longitude,
+    estimate_drop_off_latitude,
+    estimate_drop_off_longitude   
+  FROM 
+  prod_etl_data.tbl_journey_master
+  WHERE DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')>='2025-09-01'
+  and DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')<'2025-10-01'
+  and journey_type=1
+)
+,customer_Cancelled_jrny as
+(
+  select 
+  customer_id
+  , journey_id as cancelled_jrny
+  ,local_created_time 
+  ,pickup_latitude as cancelled_pickup_lat
+  ,pickup_longitude as cancelled_pickup_long
+  ,estimate_drop_off_latitude as cancelled_drop_lat
+  ,estimate_drop_off_longitude as cancelled_drop_long
+  from 
+  master_base 
+  where journey_status in (13)
+)
+
+-- select count(distinct journey_id) from master_base where journey_status in (13);--90031
+,completed_jrny as
+(
+  select 
+  customer_id
+  , journey_id completed_jrny
+  ,local_created_time as completed_jrny_create_time
+  ,pickup_latitude as completed_pickup_lat
+  ,pickup_longitude as completed_pickup_long
+  ,estimate_drop_off_latitude as completed_drop_lat
+  ,estimate_drop_off_longitude as completed_drop_long
+  
+  from 
+  master_base 
+  where journey_status in (9,10)
+)
+,next_completed_jrny as
+(
+select 
+a.* 
+,b.*
+,ST_DistanceSphere(
+        ST_MakePoint(a.cancelled_pickup_long, a.cancelled_pickup_lat),
+        ST_MakePoint(b.completed_pickup_long, b.completed_pickup_lat)
+    ) AS pickup_distance_mtr,
+
+    ST_DistanceSphere(
+        ST_MakePoint(a.cancelled_drop_long, a.cancelled_drop_lat),
+        ST_MakePoint(b.completed_drop_long, b.completed_drop_lat)
+    ) AS drop_distance_mtr
+    ,ROW_NUMBER() OVER (
+            PARTITION BY a.customer_id, a.cancelled_jrny
+            ORDER BY b.completed_jrny_create_time ) as rnk
+
+from 
+customer_Cancelled_jrny as a
+inner  join 
+completed_jrny as b
+ on a.customer_id  =b.customer_id
+ and b.completed_jrny_create_time >=  a.local_created_time 
+ and b.completed_jrny_create_time <= a.local_created_time  + interval '10 minute'
+qualify  ROW_NUMBER() OVER (
+            PARTITION BY a.customer_id, b.completed_jrny
+            ORDER BY a.local_created_time DESC)=1
+)
+-- select count(Distinct cancelled_jrny) from next_completed_jrny;
+
+-- select count(*), count(Distinct cancelled_jrny), count(Distinct completed_jrny) 
+-- from next_completed_jrny
+-- -- cancelled_jrny ='OSDAYTNC89624' and
+--   where rnk=1; --13600
+select 
+location_change_flag
+, count(Distinct  cancelled_jrny) as jrny_cnt
+ from (
+
+SELECT 
+  *,
+  CASE 
+      WHEN pickup_distance_mtr > 150 AND drop_distance_mtr > 150 THEN 'Both Changed'
+      WHEN pickup_distance_mtr > 150 THEN 'Pickup Changed'
+      WHEN drop_distance_mtr > 150 THEN 'Drop Changed'
+      ELSE 'No Change'
+  END AS location_change_flag
+FROM next_completed_jrny
+)group by 1;

@@ -1,5 +1,10 @@
--- create  table test_ric.driver_metrics_scaling_oct_1  as
+DELETE FROM prod_etl_temp.taxi_driver_scores
+WHERE DATE(query_run_timestamp) = DATE(getdate() AT TIME ZONE 'Asia/Dubai');
 
+-- -- Insert new computed results
+ INSERT INTO prod_etl_temp.taxi_driver_scores
+
+-- create table prod_etl_temp.taxi_driver_scores as
 with week_ref AS (
 SELECT 
   (date_trunc('week', current_date) - interval '1 day') + interval '1 day' AS latest_sunday_end,

@@ -1,0 +1,93 @@
+with customer_base as
+(
+SELECT 
+usertype,
+_id as ref_customer_id,
+useruid as customer_id,
+name,
+countrycode,
+mobilenumber,
+createdat,
+emailid,
+case 
+when countrycode like '%+971%' then 1 else 0 end as local_flag
+FROM public.users 
+where 
+usertype IN (1)
+-- and createdat >= '2025-02-01'
+)
+--  select count(*), count(distinct ref_customer_id) from customer_base; -- 427965
+,pickup_hood_mapping as
+(
+SELECT
+a.ref_customer_id
+,count(distinct journey_id) as jrny_cnt
+,count(distinct case when journey_status in (9,10) then journey_id end) as completed_jrny
+FROM 
+prod_etl_data.tbl_journey_master as a
+where  
+DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') > '2025-02-01' 
+group by 1
+)
+-- select sum(completed_jrny),max(completed_jrny) from pickup_hood_mapping; 922628, 505
+select 
+completed_jrny
+, count(distinct ref_customer_id)as customer_cnt 
+from
+(
+select 
+a.ref_customer_id 
+,coalesce(jrny_cnt,0) as jrny_request
+,coalesce(completed_jrny,0) as completed_jrny
+from 
+customer_base as a
+left join 
+pickup_hood_mapping as b
+on a.ref_customer_id=b.ref_customer_id
+) group by 1 order by 1;
+
+
+
+
+
+-- select journey_id, journey_created_at ,journey_status from prod_etl_data.tbl_journey_master where journey_status in (9,10) and ref_customer_id='65dc79fab17ddd0b3480a303' 
+-- order by journey_created_at desc
+
+
+WITH user_journeys AS 
+(
+  SELECT 
+    ref_customer_id,
+    journey_id,
+    journey_created_at,
+    ROW_NUMBER() OVER (PARTITION BY ref_customer_id ORDER BY journey_created_at) AS trip_number
+  FROM prod_etl_data.tbl_journey_master
+  WHERE journey_status IN (9,10)
+  and DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') > '2025-02-01' 
+)
+
+,next_trip as(
+    SELECT
+      a.ref_customer_id,
+      a.journey_created_at,
+      a.trip_number,
+      LEAD(a.journey_created_at) OVER (PARTITION BY a.ref_customer_id ORDER BY a.journey_created_at) AS next_trip_date
+    FROM user_journeys a
+)
+-- select * from next_trip where ref_customer_id='65dc79fab17ddd0b3480a303' order by journey_created_at;
+
+,retention_calc AS (
+  SELECT
+    trip_number,
+    COUNT(DISTINCT ref_customer_id) AS users_reached_n,
+    COUNT(DISTINCT CASE WHEN next_trip_date <= journey_created_at + interval '30 day' THEN ref_customer_id END) AS retained_next_30d
+  FROM 
+  next_trip
+  where ref_customer_id='65dc79fab17ddd0b3480a303' 
+  GROUP BY 1
+)
+
+SELECT 
+  trip_number,
+  retained_next_30d::decimal / users_reached_n AS retention_rate_next_30d
+FROM retention_calc;

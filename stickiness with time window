@@ -1,0 +1,59 @@
+WITH user_journeys AS 
+(
+  SELECT 
+    ref_customer_id,
+    journey_id,
+    (journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai' AS journey_created_local,
+    ROW_NUMBER() OVER (PARTITION BY ref_customer_id ORDER BY journey_created_at) AS trip_number
+  FROM prod_etl_data.tbl_journey_master
+  WHERE journey_status IN (9,10)
+    AND DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') > '2025-02-01'
+),
+
+first_journey AS (
+  SELECT 
+    ref_customer_id,
+    MIN(journey_created_local) AS first_journey_date
+  FROM user_journeys
+  GROUP BY 1
+),
+
+-- keep only rides within 90 days of first trip
+journeys_90d AS (
+  SELECT 
+    u.ref_customer_id,
+    u.journey_id,
+    u.journey_created_local,
+    u.trip_number
+  FROM user_journeys u
+  JOIN first_journey f 
+    ON u.ref_customer_id = f.ref_customer_id
+  WHERE u.journey_created_local <= f.first_journey_date + INTERVAL '90 day'
+),
+
+-- find next trip after each journey
+next_trip AS (
+  SELECT
+    a.ref_customer_id,
+    a.journey_created_local,
+    a.trip_number,
+    LEAD(a.journey_created_local) OVER (PARTITION BY a.ref_customer_id ORDER BY a.journey_created_local) AS next_trip_date
+  FROM journeys_90d a
+),
+
+-- retention at each trip milestone
+retention_calc AS (
+  SELECT
+    trip_number,
+    COUNT(DISTINCT ref_customer_id) AS users_reached_n,
+    COUNT(DISTINCT CASE WHEN next_trip_date <= journey_created_local + INTERVAL '30 day' THEN ref_customer_id END) AS retained_next_30d
+  FROM next_trip
+  GROUP BY 1
+)
+
+SELECT 
+  trip_number,
+  retained_next_30d::DECIMAL / NULLIF(users_reached_n, 0) AS retention_rate_next_30d,
+  users_reached_n
+FROM retention_calc
+ORDER BY trip_number;

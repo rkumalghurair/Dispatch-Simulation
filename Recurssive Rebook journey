@@ -1,0 +1,84 @@
+WITH RECURSIVE rebook_chain (
+    journey_id,
+    ref_journey_id,
+    ref_parent_journey_id,
+    journey_status,
+    dispatch_eta,
+    rebook_level )AS (
+
+  SELECT 
+    journey_id,
+    ref_journey_id,
+    ref_parent_journey_id,
+    journey_status,
+    dispatch_eta,
+    0 AS rebook_level
+  FROM prod_etl_data.tbl_journey_master
+  WHERE ref_parent_journey_id IS NULL
+  AND DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') > '2025-10-01'
+
+  UNION ALL
+
+  -- Recursive step: follow rebook chains
+  SELECT
+    c.journey_id,
+    c.ref_journey_id,
+    c.ref_parent_journey_id,
+    c.journey_status,
+    c.dispatch_eta,
+    p.rebook_level + 1 AS rebook_level
+  FROM prod_etl_data.tbl_journey_master c
+  JOIN rebook_chain p 
+    ON c.ref_parent_journey_id = p.ref_journey_id
+--   WHERE p.rebook_level < 3   
+)
+select * from rebook_chain where rebook_level=9;
+
+
+select * from 
+
+58578
+
+,level_summary AS (
+  SELECT
+    rebook_level,
+    COUNT(DISTINCT journey_id) AS total_journeys,
+    COUNT(DISTINCT CASE WHEN journey_status IN (9,10) THEN journey_id END) AS completed_journeys,
+    ROUND(
+      COUNT(DISTINCT CASE WHEN journey_status IN (9,10) THEN journey_id END)::decimal /
+      NULLIF(COUNT(DISTINCT journey_id), 0),
+      3
+    ) AS completion_rate
+  FROM rebook_chain
+  GROUP BY 1
+)
+select * from level_summary order by 1;
+
+
+-- Compare ETA with immediate parent trip
+,eta_comparison AS (
+  SELECT
+    c.rebook_level,
+    c.journey_id,
+    p.journey_id AS parent_journey_id,
+    c.dispatch_eta AS current_eta,
+    p.dispatch_eta AS parent_eta,
+    (c.dispatch_eta - p.dispatch_eta) AS eta_diff
+  FROM rebook_chain c
+  JOIN rebook_chain p 
+    ON c.ref_parent_journey_id = p.ref_journey_id
+  WHERE c.rebook_level <= 3
+)
+
+-- Final output
+SELECT 
+  l.rebook_level,
+  l.total_journeys,
+  l.completed_journeys,
+  l.completion_rate,
+  ROUND(AVG(e.eta_diff), 2) AS avg_eta_diff_vs_parent
+FROM level_summary l
+LEFT JOIN eta_comparison e 
+  ON l.rebook_level = e.rebook_level
+GROUP BY 1,2,3,4
+ORDER BY l.rebook_level;

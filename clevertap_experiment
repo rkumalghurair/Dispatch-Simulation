@@ -1,0 +1,58 @@
+with customer_base as
+(
+select 
+distinct 
+"profile.identity" as user_id
+,event_dt
+,date(event_dt)as event_Date
+,"eventprops.journey id"
+,"event_dt_dubai" as event_dt_dubai
+from test_ric.clevertap_test
+where "profile.identity" is not null or event_dt is not null
+)
+,jrny_Details as
+(
+select  
+journey_id
+,customer_id
+,journey_status 
+,DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') dt
+,(journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai' as local_jrny_created_time
+, extract(hour from ((journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai'))  as hr
+, extract(dow from ((journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')) as dow
+from 
+prod_etl_data.tbl_journey_master
+WHERE 
+DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') > '2025-10-14'
+and DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') <'2025-10-28'
+and extract(hour from ((journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')) in (16,17,18,19,20)
+and extract(dow from ((journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')) not in (0,6)
+)
+SELECT
+
+-- case when user_id is not null then 'Delivered' else 'Not_delivered' end as flg
+-- , count(distinct journey_id)as jrny_cnt
+-- , count(distinct customer_id) as customer_cnt
+-- , count(case when journey_status in (9,10) then journey_id end )as completed_jrny
+-- , count(case when journey_status in (13) then journey_id end )as customer_cancelled_jrny
+
+
+from 
+(
+select 
+j.* 
+,c.*
+from
+jrny_Details as j 
+Left join 
+customer_base as c
+on j.customer_id =c.user_id
+and  c.event_dt_dubai BETWEEN j.local_jrny_created_time  AND j.local_jrny_created_time + INTERVAL '1 minute'
+qualify row_number () over (partition by  journey_id order by event_dt_dubai asc ) =1
+) 
+-- group by 1;
+
+
+where customer_id='CUS_PWSRA44386' order by local_jrny_created_time;
+
+-- where user_id is not null

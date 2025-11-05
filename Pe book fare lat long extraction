@@ -1,0 +1,54 @@
+with base as
+(
+SELECT 
+    journey_id,
+    (journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai' as created_time,
+    ref_journey_id,
+    customer_id,
+    journey_status,
+    dispatch_eta,
+    pickup_latitude,
+    pickup_longitude
+  FROM prod_etl_data.tbl_journey_master
+  WHERE ref_parent_journey_id IS NULL
+  AND DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') >= '2025-10-15'
+  and DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')  <'2025-10-25'
+)
+-- select * from base
+,estimated_pickup_lat as
+(
+SELECT 
+customerid,
+ ("timestamp"::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai' as time_to_view
+,distance
+,routes
+,json_extract_path_text(json_extract_array_element_text(routes, 0), 'lat') AS first_lat
+,json_extract_path_text(json_extract_array_element_text(routes, 0), 'lng') AS first_lng
+FROM prod_etl_data.tbl_pre_book_fare_estimate
+where date(("timestamp"::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') >='2025-10-15'
+)
+select 
+distance_mtr
+, count(distinct journey_id) as jrny_cnt from 
+(
+select 
+base.* 
+,e.customerid
+,e.time_to_view
+,e.routes
+,e.first_lat
+,e.first_lng
+,ST_DistanceSphere(
+        ST_Point(base.pickup_longitude::float, base.pickup_latitude::float),
+        ST_Point(e.first_lng::float, e.first_lat::float)
+    )  AS distance_mtr
+
+,ROW_NUMBER() OVER (PARTITION BY base.journey_id ORDER BY e.time_to_view DESC) AS rnk
+from
+ base as base
+left  join estimated_pickup_lat e
+ON base.customer_id = e.customerid
+AND base.created_time  >= e.time_to_view 
+and base.created_time  <= e.time_to_view + INTERVAL '15 minutes'
+qualify rnk=1
+) group by 1;

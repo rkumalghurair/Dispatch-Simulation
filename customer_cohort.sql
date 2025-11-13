@@ -1,4 +1,4 @@
---  create table test_ric.temp_customer_cohort as
+create table test_ric.temp_customer_cohort as
 --  drop table test_ric.temp_customer_cohort
 
 with customer_base as
@@ -309,9 +309,9 @@ END AS sub_user_type
 --   else 'General_User'
 -- end as behavioral_segment
 ,case 
-   when coalesce(p.p80_trip_cost,0) >= 100 then 'High_Value'
-   when coalesce(p.p80_trip_cost,0) between 50 and 100 then 'Mid_Value'
-   when coalesce(p.p80_trip_cost,0) < 50 and coalesce(r.completed_jrny,0) > 0 then 'Low_Value'
+   when coalesce(p.p50_trip_cost,0) >= 100 then 'High_Value'
+   when coalesce(p.p50_trip_cost,0) between 50 and 100 then 'Mid_Value'
+   when coalesce(p.p50_trip_cost,0) < 50 and coalesce(r.completed_jrny,0) > 0 then 'Low_Value'
    else 'No_Value'
  end as fare_tier_segment
 
@@ -356,3 +356,43 @@ end as cancellation_behavior_segment
 from summary;
 
 
+
+
+
+
+
+
+
+
+
+select *
+ from test_ric.temp_customer_cohort   where primary_user_type ='General_Purpose'
+ and lifecycle_Segment like '%Power_User%'
+
+select * from test_ric.temp_customer_cohort limit 10
+
+select 
+primary_user_type
+ ,sub_user_type
+-- ,lifecycle_segment
+-- ,recency_flag
+,count(distinct ref_customer_id)as customer_count
+,sum(completed_jrny)as completed_jrny
+, sum(total_jrny_request)as total_jrny_request
+,sum(actual_total_fee)actual_total_fee
+,sum(total_fare_after_discount)total_fare_after_discount
+,sum(total_discount_Amount)as total_discount_Amount
+from test_ric.temp_customer_cohort 
+group by 1,2
+
+
+
+
+select * from 
+prod_etl_data.tbl_journey_master   limti 10
+where 
+journey_id='OIJHYCRB54925'
+
+
+
+select fare_tier_segment,  count(distinct customer_id) from test_ric.temp_customer_cohort group by 1

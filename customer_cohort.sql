@@ -159,20 +159,40 @@ DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai
 group by 1
 )
 
-,percentile as
-(
-select 
-ref_customer_id
-,percentile_cont(0.9) within group (order by actual_total_fee) as p90_trip_cost
-,percentile_cont(0.8) within group (order by actual_total_fee) as p80_trip_cost
-,percentile_cont(0.5) within group (order by actual_total_fee) as p50_trip_cost
--- ,percentile_cont(0.8) within group (order by actual_distance) as p80_distance
-from
-prod_etl_data.tbl_journey_master
-WHERE 
-DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23'
- group by 1
+,price_sensitivity AS (
+  SELECT
+    ref_customer_id,
+    PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY actual_total_fee) AS fare_p70,
+    CASE
+      WHEN PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY actual_total_fee) < 40 THEN 'Low-Fare Oriented'
+      WHEN PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY actual_total_fee) between 40 AND 70 THEN 'Mid-Fare Majority'
+      ELSE 'High-Fare Oriented'
+    END AS fare_segment
+  FROM prod_etl_data.tbl_journey_master
+  WHERE journey_status IN (9,10)
+  and DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23'
+  GROUP BY 1
 )
+-- select fare_segment, count(*), count(distinct ref_customer_id) from price_sensitivity group by 1;
+
+
+-- ,percentile as
+-- (
+-- select 
+-- ref_customer_id
+-- ,percentile_cont(0.9) within group (order by actual_total_fee) as p90_trip_cost
+-- ,percentile_cont(0.8) within group (order by actual_total_fee) as p80_trip_cost
+-- ,percentile_cont(0.5) within group (order by actual_total_fee) as p50_trip_cost
+-- -- ,percentile_cont(0.8) within group (order by actual_distance) as p80_distance
+-- from
+-- prod_etl_data.tbl_journey_master
+-- WHERE 
+-- DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23'
+--  group by 1
+-- )
+
+
+
 ,hourly_pattern as 
 (
   select
@@ -193,7 +213,10 @@ select
   cb.mobilenumber,
   cb.emailid,
   cb.local_flag,
+  p.fare_segment,
+  p.fare_p70,
   coalesce(r.actual_total_fee,0) as actual_total_fee,
+
   coalesce(r.total_fare_after_discount,0) as total_fare_after_discount,
   coalesce(r.total_discount_amount,0) as total_discount_amount,
 case 
@@ -235,9 +258,9 @@ case
   end as recency_flag,
   
   coalesce(r.avg_actual_fee,0) as avg_actual_fee,
-  coalesce(p.p90_trip_cost,0) as p90_trip_cost,
-  coalesce(p.p80_trip_cost,0) as p80_trip_cost,
-  coalesce(p.p50_trip_cost,0) as median_trip_cost,
+  -- coalesce(p.p90_trip_cost,0) as p90_trip_cost,
+  -- coalesce(p.p80_trip_cost,0) as p80_trip_cost,
+  -- coalesce(p.p50_trip_cost,0) as median_trip_cost,
   -- coalesce(r.avg_trip_distance,0)as avg_trip_distance,
   -- Journey category counts
   coalesce(j.mall_trips,0) as mall_trips,
@@ -263,6 +286,7 @@ case
 
 
 case
+
     when ((r.morning_trips + r.evening_trips)::numeric / nullif(r.total_jrny_request,0)) >= 0.6
          and (r.weekend_trips::numeric / nullif(r.total_jrny_request,0)) < 0.4
          then 'Commuter'
@@ -308,12 +332,12 @@ END AS sub_user_type
 --     -- when ((r.weekend_and_night_trips)::numeric / nullif(r.completed_jrny,0)) >= 0.6 then 'weekend_and_night_trips'
 --   else 'General_User'
 -- end as behavioral_segment
-,case 
-   when coalesce(p.p50_trip_cost,0) >= 100 then 'High_Value'
-   when coalesce(p.p50_trip_cost,0) between 50 and 100 then 'Mid_Value'
-   when coalesce(p.p50_trip_cost,0) < 50 and coalesce(r.completed_jrny,0) > 0 then 'Low_Value'
-   else 'No_Value'
- end as fare_tier_segment
+-- ,case 
+--    when coalesce(p.p80_trip_cost,0) >= 100 then 'High_Value'
+--    when coalesce(p.p80_trip_cost,0) between 50 and 100 then 'Mid_Value'
+--    when coalesce(p.p80_trip_cost,0) < 50 and coalesce(r.completed_jrny,0) > 0 then 'Low_Value'
+--    else 'No_Value'
+--  end as fare_tier_segment
 
 ,case 
    when coalesce(r.avg_trip_distance,0) >= 25 then 'Long_Haul_User'
@@ -340,7 +364,7 @@ end as service_mix_segment
 from customer_base cb
 left join RFM r on cb.ref_customer_id = r.ref_customer_id
 left join journey_category j on cb.ref_customer_id = j.ref_customer_id
-left join percentile p on cb.ref_customer_id = p.ref_customer_id
+left join price_sensitivity p on cb.ref_customer_id = p.ref_customer_id
 
 )
 
@@ -373,9 +397,10 @@ select * from test_ric.temp_customer_cohort limit 10
 
 select 
 primary_user_type
- ,sub_user_type
+,sub_user_type
 -- ,lifecycle_segment
 -- ,recency_flag
+fare_segment
 ,count(distinct ref_customer_id)as customer_count
 ,sum(completed_jrny)as completed_jrny
 , sum(total_jrny_request)as total_jrny_request
@@ -383,16 +408,13 @@ primary_user_type
 ,sum(total_fare_after_discount)total_fare_after_discount
 ,sum(total_discount_Amount)as total_discount_Amount
 from test_ric.temp_customer_cohort 
-group by 1,2
+group by 1,2;
+
 
 
 
 
 select * from 
-prod_etl_data.tbl_journey_master   limti 10
+prod_etl_data.tbl_journey_master  
 where 
 journey_id='OIJHYCRB54925'
-
-
-
-select fare_tier_segment,  count(distinct customer_id) from test_ric.temp_customer_cohort group by 1

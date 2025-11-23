@@ -1,3 +1,6 @@
+ create table test_ric.Customer_retention_variables as
+-- drop table test_ric.Customer_retention_variables
+
 WITH users AS (
     SELECT 
         _id AS ref_customer_id,
@@ -5,8 +8,8 @@ WITH users AS (
         mobilenumber
     FROM public.users 
     WHERE usertype = 1
-),
-
+)
+,
 -- -------------------------------------------
 --  CUSTOMER SUPPORT EVENTS (for complaint flag)
 -- -------------------------------------------
@@ -45,10 +48,6 @@ base AS (
         case when  journey_status IN (13) then 1 else 0 end  customer_cancelled,
         case when  journey_status IN (14) then 1 else 0 end  driver_cancelled,
         case when  journey_status IN (19,15) then 1 else 0 end  admin_cancelled,
-        
-
-
-
         accepted_ride_timestamp,
         on_route_timestamp,
         arrived_at_pickup_timestamp,
@@ -73,7 +72,7 @@ base AS (
     1=1
     -- j.journey_status IN (9,10)
       AND DATE((j.journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') >= '2025-07-01' 
-      AND  DATE((j.journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') <'2025-11-21'
+      AND  DATE((j.journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') <'2025-11-23'
 )
 -- select count(*), count(distinct customer_id), count(distinct journey_id )from base;
 -- 468,168 119,530
@@ -84,14 +83,14 @@ base AS (
 ,geo AS (
     SELECT 
         b.journey_id,
-        h.name AS drop_hood,
-        h.zone_name AS drop_zone
+        h.name AS pickup_hood,
+        h.zone_name AS pickup_zone
         
     FROM base b
     LEFT JOIN prod_etl_temp.tbl_hood_kml_with_zone h 
     ON ST_Contains(
         h.geom,
-        ST_SetSRID(ST_Point(b.actual_drop_off_longitude, b.actual_drop_off_latitude), ST_SRID(h.geom))
+        ST_SetSRID(ST_Point(b.pickup_longitude, b.pickup_latitude), ST_SRID(h.geom))
     )
     QUALIFY ROW_NUMBER() OVER (PARTITION BY b.journey_id ORDER BY ST_Area(h.geom)) = 1
 )
@@ -104,8 +103,8 @@ base AS (
 ,fare AS (
     SELECT
         b.*,
-        g.drop_hood,
-        g.drop_zone,
+        g.pickup_hood,
+        g.pickup_zone,
 
         ST_DistanceSphere(
             ST_MakePoint(estimate_drop_off_longitude, estimate_drop_off_latitude),
@@ -115,13 +114,14 @@ base AS (
         (actual_total_fee - estimate_total_fee) / NULLIF(estimate_total_fee,0) AS price_error,
 
         CASE 
+         when actual_total_fee is null then null
             WHEN actual_total_fee <= 30 THEN '0.<30'
             WHEN actual_total_fee <= 50 THEN '1.30-50'
             WHEN actual_total_fee <= 70 THEN '2.50-70'
             ELSE '3.>70'
         END AS fee_bucket,
 
-        CASE
+        CASE when actual_total_fee is null then null 
             WHEN (actual_total_fee - estimate_total_fee) <= 0 THEN '0.<=0'
             WHEN price_error <= 0.05 THEN '1.0–5%'
             WHEN price_error <= 0.10 THEN '2.5–10%'
@@ -159,11 +159,20 @@ base AS (
     SELECT
         ref_customer_id,
         journey_id,
-        ROW_NUMBER() OVER ( PARTITION BY ref_customer_id ORDER BY journey_created_at) AS trip_seq_num,
+        ROW_NUMBER() OVER ( PARTITION BY ref_customer_id ORDER BY journey_created_at) AS completed_trip_seq_num,
         ROW_NUMBER() OVER ( PARTITION BY ref_customer_id ORDER BY journey_created_at ) - 1 AS prior_completed_trips
     FROM prod_etl_data.tbl_journey_master 
     WHERE 
     journey_status IN (9,10)
+)
+
+,prior_journey_request AS (
+    SELECT
+        ref_customer_id,
+        journey_id,
+        ROW_NUMBER() OVER ( PARTITION BY ref_customer_id ORDER BY journey_created_at) AS request_seq_num,
+        ROW_NUMBER() OVER ( PARTITION BY ref_customer_id ORDER BY journey_created_at ) - 1 AS prior_requests
+    FROM prod_etl_data.tbl_journey_master 
 )
 
 -- select count(*), count(distinct journey_id), count(distinct ref_customer_id) from prior_trips;
@@ -259,7 +268,7 @@ base AS (
                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum_total_trips
     FROM prod_etl_data.tbl_journey_master
     WHERE 
-       DATE((journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') <  '2025-11-21'
+       DATE((journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') <  '2025-11-23'
 )
 
 -- ============================================================
@@ -345,9 +354,10 @@ SELECT
     prev_driver_cancelled,
     prev_admin_cancelled,
     -- Trip sequence features
-    p.trip_seq_num,
-    CASE WHEN p.trip_seq_num = 1 THEN 1 ELSE 0 END AS first_time_user_flag,
+    p.completed_trip_seq_num,
+    -- CASE WHEN p.trip_seq_num = 1 THEN 1 ELSE 0 END AS first_time_user_flag,
     p.prior_completed_trips,
+
 
     mf.time_since_last_trip_day,
 
@@ -375,12 +385,14 @@ SELECT
     mf.pickup_longitude,
     mf.actual_drop_off_latitude,
     mf.actual_drop_off_longitude,
-    mf.drop_hood,
-    mf.drop_zone,
+    mf.pickup_hood,
+    mf.pickup_zone,
 
     -- Behavioural features
     mf.trips_in_next_30min,
     mf.vehicle_cat,
+     jr.request_seq_num,
+     jr.prior_requests,
 
 
     -- Ratings / Complaints
@@ -412,6 +424,8 @@ LEFT JOIN ratings rt
     ON rt.ref_journey_id = mf.ref_journey_id
 
 LEFT JOIN overall_status os
-    ON os.journey_id = mf.journey_id;
+    ON os.journey_id = mf.journey_id
 
--- 468168	468168	119530	
+
+LEFT JOIN prior_journey_request jr 
+    ON jr.journey_id = mf.journey_id;

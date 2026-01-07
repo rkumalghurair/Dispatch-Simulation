@@ -1,6 +1,5 @@
-drop table prod_etl_temp.customer_cohort_mkt
+drop table prod_etl_temp.customer_cohort_mkt;
 create table prod_etl_temp.customer_cohort_mkt as
-
 with customer_base as
 (
 SELECT 
@@ -16,7 +15,7 @@ case
 when countrycode like '%+971%' then 1 else 0 end as local_flag
 FROM public.users 
 where usertype IN (1)
-and createdat >= '2025-02-01'
+-- and createdat >= '2025-02-01'
 )
 -- select count(*), count(distinct ref_customer_id) from customer_base; -- 305,821
 ,pickup_hood_mapping as
@@ -44,7 +43,7 @@ LEFT JOIN prod_etl_temp.tbl_hood_kml_with_zone AS b
        ST_SetSRID(ST_Point(a.pickup_longitude, a.pickup_latitude), ST_SRID(b.geom))
      )
 where  
-DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23' 
+DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') <  DATE_TRUNC('week', CURRENT_DATE) --before current week monday
 QUALIFY ROW_NUMBER() OVER ( PARTITION BY a.journey_id ORDER BY ST_Area(b.geom) ASC) = 1
 )
 
@@ -76,9 +75,10 @@ LEFT JOIN prod_etl_temp.tbl_hood_kml_with_zone AS b
        ST_SetSRID(ST_Point(a.actual_drop_off_longitude, a.actual_drop_off_latitude), ST_SRID(b.geom))
      )
 where   
-DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23' 
+DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < DATE_TRUNC('week', CURRENT_DATE) 
 QUALIFY ROW_NUMBER() OVER (PARTITION BY a.journey_id ORDER BY ST_Area(b.geom) ASC) = 1 
 )
+
 ,journey_category as 
 (
 SELECT 
@@ -113,18 +113,21 @@ from
   from prod_etl_data.tbl_journey_master as j
   left join pickup_hood_mapping p on j.journey_id = p.journey_id
   left join dropoff_hood_mapping d on j.journey_id = d.journey_id
- WHERE  DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23' 
+ WHERE  DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < DATE_TRUNC('week', CURRENT_DATE) 
 )
 group by 1
 )
+
 ,RFM as
 (
 select 
 ref_customer_id
 ,date_part('week', max((journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')) as last_week_active 
 ,count(distinct date_part('week', (journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')) as active_weeks --Active ≥8 of last 12 weeks → Regular CommutersActive ≤2 weeks → Occasional / Tourists
+
 ,min(DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai'))as first_jrny_date
 ,max(DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai'))as last_jrny_date
+
 ,count( distinct case when  journey_status IN (9,10) then journey_id end )as completed_jrny
 ,count( distinct case when  journey_status IN (13 )  then journey_id end )as user_cancelled_jrny
 ,count( distinct  journey_id  )as total_jrny_request
@@ -132,10 +135,9 @@ ref_customer_id
 ,avg(estimate_total_fee) as avg_estimated_fee
 ,avg (actual_total_fee) as avg_actual_fee
 
-
 ,sum(actual_total_fee)  as actual_total_fee
 ,sum(actual_discount_amount)as total_discount_amount
-, sum(actual_total_fee-actual_discount_amount)as total_fare_after_discount
+,sum(actual_total_fee-actual_discount_amount)as total_fare_after_discount
 
 ,stddev(actual_total_fee) as stddev_trip_cost
 ,count(distinct case when ref_promo_applied is not null then journey_id end )as jrny_request_with_promo
@@ -155,7 +157,7 @@ then journey_id end )
 from 
 prod_etl_data.tbl_journey_master
 WHERE 
-DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23'
+DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < DATE_TRUNC('week', CURRENT_DATE) 
 group by 1
 )
 
@@ -170,7 +172,7 @@ group by 1
     END AS fare_segment
   FROM prod_etl_data.tbl_journey_master
   WHERE journey_status IN (9,10)
-  and DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23'
+  and DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < DATE_TRUNC('week', CURRENT_DATE) 
   GROUP BY 1
 )
 
@@ -181,7 +183,7 @@ group by 1
     extract(hour from ((journey_created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai')) as hr_local,
     count(distinct journey_id) as hr_trip_cnt
   from prod_etl_data.tbl_journey_master
-  where DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < '2025-10-23'
+  where DATE((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') < DATE_TRUNC('week', CURRENT_DATE) 
   group by 1,2
 )
 ,summary as
@@ -192,23 +194,46 @@ select
   cb.name,
   cb.countrycode,
   cb.mobilenumber,
-  cb.emailid,
   cb.local_flag,
+  cb.emailid,
+  cb.createdat as registration_date,
+
+  r.first_jrny_date,
+  r.last_jrny_date,
+
+  date (DATE_TRUNC('week', r.first_jrny_date)) AS first_active_week,
+  date(DATE_TRUNC('month', r.first_jrny_date))  AS first_active_month,
+  DATEDIFF( day, r.last_jrny_date, CURRENT_DATE)  AS recency_days,
+
+   
+  CASE WHEN r.last_jrny_date IS NULL THEN 'Never_Active'
+  WHEN DATEDIFF(day, r.last_jrny_date, CURRENT_DATE) <= 7  THEN '0-7_days'
+  WHEN DATEDIFF(day, r.last_jrny_date, CURRENT_DATE) <= 30 THEN '8-30_days'
+  WHEN DATEDIFF(day, r.last_jrny_date, CURRENT_DATE) <= 90 THEN '31-90_days'
+  ELSE '90+_days' END AS recency_bucket,
+
+
   p.fare_segment,
   p.fare_p70,
   coalesce(r.actual_total_fee,0) as actual_total_fee,
-
   coalesce(r.total_fare_after_discount,0) as total_fare_after_discount,
   coalesce(r.total_discount_amount,0) as total_discount_amount,
+
 case 
    when coalesce(r.total_jrny_request,0) = 0 then 'No_Request'
    when coalesce(r.jrny_request_with_promo,0)::decimal(18,6) 
-        / nullif(r.total_jrny_request::decimal(18,6),0) >= 0.8 then 'Promo_Heavy_User'
+        / nullif(r.total_jrny_request::decimal(18,6),0) = 1 then '100_percent_promo_user'
+
    when coalesce(r.jrny_request_with_promo,0)::decimal(18,6) 
-        / nullif(r.total_jrny_request::decimal(18,6),0) between 0.3 and 0.8 then 'Promo_Balanced_User'
+        / nullif(r.total_jrny_request::decimal(18,6),0) >= 0.8 and coalesce(r.jrny_request_with_promo,0)::decimal(18,6) 
+        / nullif(r.total_jrny_request::decimal(18,6),0) < 1 then 'Promo_Heavy_User_80_perc'
+
+   when coalesce(r.jrny_request_with_promo,0)::decimal(18,6) 
+        / nullif(r.total_jrny_request::decimal(18,6),0) between 0.3 and 0.8 then 'Promo_Balanced_User_30_80_perc'
+
    when coalesce(r.jrny_request_with_promo,0)::decimal(18,6) 
         / nullif(r.total_jrny_request::decimal(18,6),0) < 0.3 
-        and coalesce(r.jrny_request_with_promo,0) > 0 then 'Occasional_Promo_User'
+        and coalesce(r.jrny_request_with_promo,0) > 0 then 'Occasional_Promo_User_less_than_30_perc'
    when coalesce(r.jrny_request_with_promo,0) = 0 
         and coalesce(r.total_jrny_request,0) > 0 then 'Non_Promo_User'
    else 'Unknown'
@@ -254,8 +279,11 @@ case
   case 
     when r.total_jrny_request = 0 then 'Acquired_No_Trip'
      when r.total_jrny_request > 0 and completed_jrny =0 then 'Attempted_but_0_fulfilled'
+     
     when r.completed_jrny = 1 then 'Single_Completed_Trip_User'
-    when r.completed_jrny between 2 and 9 then 'Casual_User'
+    when r.completed_jrny between 2 and 5 then 'Casual_User_2_5'
+
+    when r.completed_jrny between 6 and 9 then 'Casual_User_6_9'
     when r.completed_jrny >= 10 then 'Power_User'
     else 'Unknown'
   end as lifecycle_segment,
@@ -302,12 +330,6 @@ END AS sub_user_type
    else 'No_Journey'
  end as distance_segment
 
-,case 
-   when r.active_weeks >= 8  then 'Consistent_Weekly_User'
-   when r.active_weeks between 4 and 7 then 'Occasional_User'
-   when r.active_weeks between 1 and 3 then 'Infrequent_User'
-   else 'Inactive'
- end as consistency_segment
 
 ,case
   when coalesce(r.total_jrny_request,0) = 0 then 'No_Request'
@@ -335,13 +357,4 @@ else 'No_Data'
 end as cancellation_behavior_segment
 , CURRENT_TIMESTAMP AS ingestion_ts
 from summary;
-
-
-
-
-
--- select count(*), count(distinct customer_id) from prod_etl_temp.customer_cohort_mkt limit 10
- 
-
-
 

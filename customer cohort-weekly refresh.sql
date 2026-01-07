@@ -1,4 +1,5 @@
 drop table prod_etl_temp.customer_cohort_mkt;
+
 create table prod_etl_temp.customer_cohort_mkt as
 with customer_base as
 (
@@ -203,6 +204,9 @@ select
 
   date (DATE_TRUNC('week', r.first_jrny_date)) AS first_active_week,
   date(DATE_TRUNC('month', r.first_jrny_date))  AS first_active_month,
+
+  -- (dateadd(hour, 4, getdate())::date - r.last_jrny_date) as recency_days
+
   DATEDIFF( day, r.last_jrny_date, CURRENT_DATE)  AS recency_days,
 
    
@@ -211,6 +215,16 @@ select
   WHEN DATEDIFF(day, r.last_jrny_date, CURRENT_DATE) <= 30 THEN '8-30_days'
   WHEN DATEDIFF(day, r.last_jrny_date, CURRENT_DATE) <= 90 THEN '31-90_days'
   ELSE '90+_days' END AS recency_bucket,
+
+    case 
+    when r.first_jrny_date is null then 'Never_Active'
+    when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 7  then 'Active_This_Week'
+        when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 14  then 'Active_Past2_Week'
+    when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 30 then 'Active_This_Month'
+    when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 90 then 'Active_Last_3_Months'
+    when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 180 then 'Dormant_3_6M'
+    else 'Dormant_6Mplus'
+  end as recency_flag,
 
 
   p.fare_segment,
@@ -246,22 +260,12 @@ case
   coalesce(r.active_weeks,0) as active_weeks,
   coalesce(Taxi_request,0) as Taxi_request,
   coalesce(Limo_request,0) as limo_request,
-  r.first_jrny_date,
-  r.last_jrny_date,
-  (dateadd(hour, 4, getdate())::date - r.last_jrny_date) as recency_days
-   ,round(coalesce(r.user_cancelled_jrny::numeric / nullif(r.total_jrny_request,0),0),3) as cancellation_ratio,
+
+   round(coalesce(r.user_cancelled_jrny::numeric / nullif(r.total_jrny_request,0),0),3) as cancellation_ratio,
     coalesce(r.avg_trip_distance,0) as avg_trip_distance,
      coalesce(r.avg_fee_diff,0) as avg_fee_diff,
 
-  case 
-    when r.first_jrny_date is null then 'Never_Active'
-    when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 7  then 'Active_This_Week'
-        when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 14  then 'Active_Past2_Week'
-    when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 30 then 'Active_This_Month'
-    when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 90 then 'Active_Last_3_Months'
-    when (dateadd(hour, 4, getdate())::date - r.last_jrny_date) <= 180 then 'Dormant_3_6M'
-    else 'Dormant_6Mplus'
-  end as recency_flag,
+
   
   coalesce(r.avg_actual_fee,0) as avg_actual_fee,
   

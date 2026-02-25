@@ -155,10 +155,10 @@ on base_3.ref_journey_id =r.ref_journey_id
 , acceptance_lifetime AS (
   SELECT
     ref_driver_id,
-    COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE '%accepted%' THEN journey_id END) AS total_journey_accepted_lt,
+    COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE 'accept%' THEN journey_id END) AS total_journey_accepted_lt,
     COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE '%elapsed%'  THEN journey_id END) AS total_journey_elapsed_lt,
     COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE '%rejected%' THEN journey_id END) AS total_journey_rejected_lt,
-    COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE '%accepted%'OR trim(lower(driver_action)) LIKE '%elapsed%' OR trim(lower(driver_action)) LIKE '%rejected%'
+    COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE 'accept%'OR trim(lower(driver_action)) LIKE '%elapsed%' OR trim(lower(driver_action)) LIKE '%rejected%'
                    THEN journey_id END) AS total_offered_jrny_lt
   FROM jrny_history_acc
   GROUP BY 1
@@ -166,10 +166,10 @@ on base_3.ref_journey_id =r.ref_journey_id
 , acceptance_30d AS (
   SELECT
     ref_driver_id,
-    COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE '%accepted%' THEN journey_id END) AS total_journey_accepted_30d,
+    COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE 'accept%' THEN journey_id END) AS total_journey_accepted_30d,
     COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE '%elapsed%'  THEN journey_id END) AS total_journey_elapsed_30d,
     COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE '%rejected%' THEN journey_id END) AS total_journey_rejected_30d,
-    COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE '%accepted%' OR trim(lower(driver_action)) LIKE '%elapsed%'OR trim(lower(driver_action)) LIKE '%rejected%'
+    COUNT(DISTINCT CASE WHEN trim(lower(driver_action)) LIKE 'accept%' OR trim(lower(driver_action)) LIKE '%elapsed%'OR trim(lower(driver_action)) LIKE '%rejected%'
                    THEN journey_id END) AS total_offered_jrny_30d
   FROM jrny_history_acc
   WHERE local_action_ts >= (SELECT start_30day_period FROM week_ref)

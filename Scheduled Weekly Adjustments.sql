@@ -1,5 +1,8 @@
+
 -- Step 1 : Purge anything older than 55 weeks
--- DELETE FROM prod_etl_data.Weekly_Adjustments_scheduled where  pickup_date< (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')) - INTERVAL '55 weeks')::date;
+DELETE FROM prod_etl_data.Weekly_Adjustments_scheduled where  pickup_date < (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')) - INTERVAL '55 weeks')::date;
+
+
 
 -- Step 2 : 
 INSERT INTO prod_etl_data.Weekly_Adjustments_scheduled
@@ -17,8 +20,8 @@ with adjusted_base AS
     public.journeyadjustment 
     where 
     lower(trim(adjustmentapplicability )) in ('both', 'driver')
-  	and (createdat AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dubai') >= (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')) - INTERVAL '7 days')::date 
-    and (createdat AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dubai') <  (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')))::date 
+  	and (updatedat AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dubai') >= (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')) - INTERVAL '7 days')::date 
+    and (updatedat AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dubai') <  (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')))::date 
   
   )
   group by 1
@@ -125,8 +128,8 @@ on jm.journey_id =inst.journey_id
 WHERE
 1=1
 And ref_driver_id is not null
-AND (jm.pickup_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dubai')  >= (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')) - INTERVAL '7 days')::date 
-AND (jm.pickup_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dubai')  <  (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')))::date
+AND (jm.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dubai')  >=  (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')) - INTERVAL '7 days')::date 
+AND (jm.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Dubai')  <  (DATE_TRUNC('week', (CURRENT_DATE AT TIME ZONE 'Asia/Dubai')))::date
 )
 
 

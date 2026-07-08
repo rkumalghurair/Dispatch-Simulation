@@ -1,3 +1,6 @@
+
+
+
 /*
 =============================================================================
   Cohort  : Users whose true first-ever completed trip was Jan–May 2026
@@ -178,7 +181,7 @@ first_trips AS (
 	 on ft.ref_journey_id =rating.ref_journey_id
 	 
     WHERE trip_rank   = 1
-      AND journey_dt >= '2026-03-01'
+      AND journey_dt >= '2026-03-14'
       AND journey_dt <  '2026-06-10'    -- 21 days needed to observe churn for these users
 )
 -- ── STEP 5: Y label — returned within 21 days? ───────────────────────────
@@ -542,7 +545,7 @@ SELECT
 	w.trips_cashback_earned_day5,
     -- ── DEVICE / FRAUD SIGNALS ───────────────────────────────────────────
     COALESCE(ds.accounts_per_device,       1)            AS accounts_per_device,
-    COALESCE(ds.accounts_per_appsflyer_id, 1)            AS accounts_per_appsflyer_id,
+    -- COALESCE(ds.accounts_per_appsflyer_id, 1)            AS accounts_per_appsflyer_id,
     COALESCE(ds.accounts_per_email,        1)            AS accounts_per_email,
     CASE WHEN COALESCE(ds.accounts_per_device,1) > 1
          THEN 1 ELSE 0 END                               AS is_shared_device
@@ -584,13 +587,3 @@ LEFT  JOIN user_meta      um ON ft.ref_customer_id = um.ref_customer_id
 LEFT JOIN session_features sf ON ft.customer_id = sf.customer_id
 
 ORDER BY 1,2
-
-
-
-
-
-
-
-
-
-

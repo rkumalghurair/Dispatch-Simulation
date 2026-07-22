@@ -74,7 +74,7 @@ then 'Taxi' else 'Limo' end as vehicle_cat
 from 
 prod_etl_data.tbl_journey_master  
 where 
-date ((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') >= '2025-01-01'
+date ((journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') >= '2026-03-01'
 and date ( (journey_created_at::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') <  (SELECT latest_sunday_end FROM week_ref)
 )
 
@@ -148,7 +148,7 @@ on base_3.ref_journey_id =r.ref_journey_id
     (timestamp::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai' AS local_action_ts
 
   FROM prod_etl_data.tbl_journey_history
-  WHERE date((timestamp::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') >= '2025-12-10'
+  WHERE date((timestamp::timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Dubai') >= '2026-03-01'
     AND estimate_eta IS NOT NULL
 )
 

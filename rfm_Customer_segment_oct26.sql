@@ -118,9 +118,9 @@ SELECT
     base_segment                             AS rfm_segment,
 
     CASE WHEN days_since_last <= 30  THEN 'R1_Active'
-         WHEN days_since_last <= 60  THEN 'R2_Inactive'
+         WHEN days_since_last <= 60  THEN 'R2_At_risk'
          WHEN days_since_last <= 90  THEN 'R3_Dormant'
-         WHEN days_since_last <= 180 THEN 'R4_Lapsed'
+         WHEN days_since_last <= 180 THEN 'R4_Dark'
          WHEN days_since_last <= 365 THEN 'R5_Lost'
          ELSE                             'R6_Archive' END              AS r_tier,
 

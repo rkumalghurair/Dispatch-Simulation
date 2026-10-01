@@ -93,7 +93,7 @@ segmented AS (
             WHEN days_since_last <= 90  AND lifetime_trips >= 5  THEN '09_Dormant_Frequent'
             WHEN days_since_last <= 90  AND lifetime_trips >= 2  THEN '10_Dormant_Casual'
             WHEN days_since_last <= 90                           THEN '11_Dormant_One_Trip'
-            WHEN days_since_last <= 180                          THEN '12_Lapsed'
+            WHEN days_since_last <= 180                          THEN '12_Dark'
             WHEN days_since_last <= 365                          THEN '13_Lost'
             ELSE                                                      '14_Archive'
         END AS base_segment
